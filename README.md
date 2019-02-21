@@ -16,9 +16,83 @@ Create Standard_HC44rs VMs in the resource group
 az group deployment create -g avhc1 --template-file create-hc-vm.json
 ```
 
-## Install Mellanox Driver on the VMs
+SSH to the VM and check if controller is being passed through
+```
+avhc20:~ # lspci
+0000:00:00.0 Host bridge: Intel Corporation 440BX/ZX/DX - 82443BX/ZX/DX Host bridge (AGP disabled) (rev 03)
+0000:00:07.0 ISA bridge: Intel Corporation 82371AB/EB/MB PIIX4 ISA (rev 01)
+0000:00:07.1 IDE interface: Intel Corporation 82371AB/EB/MB PIIX4 IDE (rev 01)
+0000:00:07.3 Bridge: Intel Corporation 82371AB/EB/MB PIIX4 ACPI (rev 02)
+0000:00:08.0 VGA compatible controller: Microsoft Corporation Hyper-V virtual VGA
+98da:00:02.0 Infiniband controller: Mellanox Technologies MT27800 Family [ConnectX-5 Virtual Function]
+```
 
-### SLES 12 SP3
+## SLES 12 SP3
+
+I tried two approaches to install Mellanox drivers on my VMs:
+1. download, build, and install the latest OFED drivers 
+2. use "zypper install" to install the drivers
+
+### Option 1: Download, build, and install Mellanox OFED drivers
+
+Check current kernel version
+```
+avhc20:~ # uname -a
+Linux avhc20 4.4.143-4.13-azure #1 SMP Fri Aug 10 09:24:25 UTC 2018 (52f9184) x86_64 x86_64 x86_64 GNU/Linux
+```
+
+Update to latest version in SP3 that kernel-devel-azure package can be installed properly
+```
+zypper update
+reboot
+```
+
+Check latest kernel version. For me on Feb 21 '19 it was 4.4.170-4.22-azure.
+```
+avhc20:~ # uname -a
+Linux avhc20 4.4.170-4.22-azure #1 SMP Thu Jan 17 06:00:39 UTC 2019 (5499596) x86_64 x86_64 x86_64 GNU/Linux
+```
+
+I tried the steps below by following instructions from Mellanox https://community.mellanox.com/s/article/howto-install-mlnx-ofed-driver
+
+Download SLES 12 SP3 specific OFED from Mellanox
+```
+wget http://content.mellanox.com/ofed/MLNX_OFED-4.5-1.0.1.0/MLNX_OFED_LINUX-4.5-1.0.1.0-sles12sp3-x86_64.tgz
+tar xvf MLNX_OFED_LINUX-4.5-1.0.1.0-sles12sp3-x86_64.tgz
+```
+
+Install requirements for building OFED RPM
+```
+zypper -n install kernel-devel-azure
+zypper -n install createrepo rpm-build kernel-syms gcc make python-devel python-libxml2 tk libgtk-2_0-0
+```
+
+Build and install OFED with kernel support
+```
+./MLNX_OFED_LINUX-4.5-1.0.1.0-sles12sp3-x86_64/mlnxofedinstall --add-kernel-support
+
+reboot
+```
+
+Check that mlx5 module is loaded
+```
+avhc21:~ # lsmod | grep mlx5
+mlx5_fpga_tools        16384  0
+mlx5_ib               356352  0
+ib_uverbs             126976  3 mlx5_ib,ib_ucm,rdma_ucm
+ib_core               307200  10 rdma_cm,ib_cm,iw_cm,mlx4_ib,mlx5_ib,ib_ucm,ib_umad,ib_uverbs,rdma_ucm,ib_ipoib
+mlx5_core             946176  2 mlx5_ib,mlx5_fpga_tools
+mlxfw                  24576  1 mlx5_core
+devlink                32768  4 mlx4_en,mlx4_ib,mlx4_core,mlx5_core
+inet_lro               16384  2 mlx5_core,ib_ipoib
+mlx_compat             24576  15 rdma_cm,ib_cm,iw_cm,mlx4_en,mlx4_ib,mlx5_ib,mlx5_fpga_tools,ib_ucm,ib_core,ib_umad,ib_uverbs,mlx4_core,mlx5_core,rdma_ucm,ib_ipoib
+vxlan                  49152  2 mlx4_en,mlx5_core
+ptp                    20480  3 hv_utils,mlx4_en,mlx5_core
+```
+
+### Option 2: Use "zypper install" to get Mellanox drivers
+
+I tried the steps below by following instructions from Mellanox http://www.mellanox.com/pdf/prod_software/SUSE_Linux_Enterprise_Server_(SLES)_12_SP3_Driver_User_Manual.pdf
 
 Install Mellanox drivers and reboot
 ```
@@ -36,6 +110,8 @@ devlink                32768  1 mlx5_core
 vxlan                  49152  1 mlx5_core
 ptp                    20480  2 hv_utils,mlx5_core
 ```
+
+### Configure ib0 interface manually 
 
 Get the rdmaIPv4Address from SharedConfig.xml file
 ```
@@ -84,6 +160,21 @@ lo        Link encap:Local Loopback
           TX packets:4 errors:0 dropped:0 overruns:0 carrier:0
           collisions:0 txqueuelen:1
           RX bytes:264 (264.0 b)  TX bytes:264 (264.0 b)
+```
+
+
+### Configure ib0 interface via waagent
+
+Update waagent to version 2.2.36 (default version on my VM was 2.2.18)
+```
+zypper remove python-azure-agent
+wget https://github.com/Azure/WALinuxAgent/archive/v2.2.36.zip
+unzip v2.2.36.zip
+cd WALinuxAgent*/
+python setup.py install --register-service --force
+sed -i -e 's/# OS.EnableRDMA=y/OS.EnableRDMA=y/g' /etc/waagent.conf
+sed -i -e 's/# AutoUpdate.Enabled=y/AutoUpdate.Enabled=y/g' /etc/waagent.conf
+systemctl restart waagent
 ```
 
 ### Test latency using ib_send_lat
@@ -182,7 +273,7 @@ avhc21:~ # ib_send_lat -a 172.16.1.28
 ---------------------------------------------------------------------------------------
 ```
 
-## Test throughput using ib_send_bw
+### Test throughput using ib_send_bw
 
 Server
 ```
