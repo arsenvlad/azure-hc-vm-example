@@ -2,7 +2,9 @@
 
 ## Deploy VMs
 
-As of February 2019 HC44rs VMs are still in preview, your subscription needs to be whitelisted to be able to deploy these VMs. Learn more [here](https://azure.microsoft.com/en-us/blog/introducing-the-new-hb-and-hc-azure-vm-sizes-for-hpc/).
+As of February 2019, HC44rs VMs are still in preview, so your subscription needs to be whitelisted to be able to deploy these VMs. Learn more [here](https://azure.microsoft.com/en-us/blog/introducing-the-new-hb-and-hc-azure-vm-sizes-for-hpc/). 
+
+Also, while in early preview, Accelerated Networking is not yet supported.
 
 In this example, I deploy VMs using SLES 12 SP3 just for testing, but minimal supported version of SLES is currently SLES 12 SP4.
 
